@@ -8,9 +8,11 @@ plugins {
 // - CI：由 GitHub Secrets 還原 android/app/news-release.jks，並用環境變數傳密碼
 // - 本機：把 .jks 放到 android/app/ 並設 NEWS_KEYSTORE_PASSWORD 環境變數即可簽章
 // 沒有金鑰時仍可 assembleRelease，只是產出 unsigned APK（僅供測試）
+// 注意：Secret 沒設時環境變數會是「空字串」而不是 null，所以一律用 env() 轉成 null
+val env: (String) -> String? = { name -> System.getenv(name)?.takeIf { it.isNotBlank() } }
 val keystoreFile = file("news-release.jks")
-val keystorePassword: String? = System.getenv("NEWS_KEYSTORE_PASSWORD")
-val canSign = keystoreFile.exists() && !keystorePassword.isNullOrEmpty()
+val keystorePassword: String? = env("NEWS_KEYSTORE_PASSWORD")
+val canSign = keystoreFile.exists() && keystorePassword != null
 
 android {
     namespace = "com.pliok.newsdownloader"
@@ -29,8 +31,8 @@ android {
             create("release") {
                 storeFile = keystoreFile
                 storePassword = keystorePassword ?: ""
-                keyAlias = System.getenv("NEWS_KEY_ALIAS") ?: "news"
-                keyPassword = System.getenv("NEWS_KEY_PASSWORD") ?: (keystorePassword ?: "")
+                keyAlias = env("NEWS_KEY_ALIAS") ?: "news"
+                keyPassword = env("NEWS_KEY_PASSWORD") ?: (keystorePassword ?: "")
             }
         }
     }
