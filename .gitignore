@@ -1,0 +1,10 @@
+# 只保留專案需要的東西
+*.iml
+.gradle/
+local.properties
+.idea/
+android/build/
+android/app/build/
+android/app/news-release.jks
+build.log
+ci-logs/
