@@ -1,3 +1,4 @@
+// v1.1 — 簽章金鑰改由 GitHub Secrets 提供（金鑰本體不再進 repo）
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
