@@ -1,0 +1,103 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android/**'
+      - 'tools/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # 簽章金鑰不放 repo，改由 GitHub Secrets 提供：
+      #   NEWS_KEYSTORE_B64        金鑰檔的 base64（單行）
+      #   NEWS_KEYSTORE_PASSWORD   金鑰密碼（key password 預設相同）
+      - name: Restore signing keystore from secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.NEWS_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::缺少 secret NEWS_KEYSTORE_B64（Repo → Settings → Secrets and variables → Actions）"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/news-release.jks
+          ls -l android/app/news-release.jks
+
+      # 防止「元件忘記明寫 layout_width/height」造成的 InflateException
+      - name: Check layouts
+        run: python3 tools/check_layouts.py android/app/src/main/res/layout
+
+      - name: Build release APK
+        working-directory: android
+        shell: bash
+        env:
+          NEWS_KEYSTORE_PASSWORD: ${{ secrets.NEWS_KEYSTORE_PASSWORD }}
+          NEWS_KEY_PASSWORD: ${{ secrets.NEWS_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+
+      # 建置失敗時，把 Gradle 輸出推到 ci-logs 分支，方便事後排查
+      - name: Publish failure log to ci-logs branch
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p ci-logs
+          if [ -f build.log ]; then cp build.log ci-logs/build-failure.log; else echo "no build.log" > ci-logs/build-failure.log; fi
+          git checkout -B ci-logs
+          git add -f ci-logs/build-failure.log
+          git commit -m "ci: 建置失敗 log" || echo "nothing to commit"
+          git push -f origin ci-logs || echo "push failed"
+
+      - name: Prepare output
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/news-downloader.apk
+          ls -lh out
+          echo "APK 簽章指紋："
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs out/news-downloader.apk | grep SHA-256 || true
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: news-downloader-apk
+          path: out/news-downloader.apk
+          if-no-files-found: error
+
+      - name: Publish to Release (direct download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "新聞下載器 APK (latest)"
+          body: |
+            自動建置的 Android APK（每次推送 main 會更新）。
+
+            下載 `news-downloader.apk` → 在手機上允許「安裝未知來源的應用程式」→ 點擊安裝。
+
+            **注意**：自 1.1 版起換了簽章金鑰，若曾裝過 1.0 版，請先卸載舊版再安裝。
+          files: out/news-downloader.apk
+          make_latest: true
